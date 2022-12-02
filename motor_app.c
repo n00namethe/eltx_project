@@ -12,12 +12,8 @@
 
 #define DEFAULT_VALUE 0
 
-#define MOTOR_MOVE		0x3
-#define MOTOR_RESET		0x2
-
-#define STEP_SIZE 260
-#define MOTOR_ZERO_POINT 0
-
+#define MOTOR_MOVE		    0x3
+#define MOTOR_GET_STATUS    0x4
 
 struct mq_attr attributes_for_motor2pic_queue = 
 {
@@ -57,18 +53,14 @@ typedef struct _motor_steps_t
 //struct sigevent sigev;
 typedef struct _motor_context_t
 {
-    motor2pic_t msg_m2p;
-    pic2motor_t msg_p2m;
-	int cur_step;
-	int step;
 	mqd_t pic2motor_queue;
 	mqd_t motor2pic_queue;
 } motor_context_t;
 motor_context_t motor_ctx = {0};
 
-void here_are_am()
+void here_are_am(const char *asker_func_name)
 {
-    printf("я зашел в %s\n", __FUNCTION__);
+    printf("я зашел в %s\n", asker_func_name);
 }
 
 /*void sig_receive_message()
@@ -82,18 +74,6 @@ void here_are_am()
         printf("%s: %s\n", struct_to_receive.sender.client_name, struct_to_receive.server_to_client_msg);
     } 
 }*/
-
-int send_motor2pic_reply(motor2pic_t *to_send)
-{
-    here_are_am(__FUNCTION__);
-	if (mq_send(motor_ctx.motor2pic_queue, (char *)to_send, sizeof(motor2pic_t), PRIORITY_OF_QUEUE) == -1)
-    {
-        printf("mq_send motor2pic_queue not success, errno = %d\n", errno);
-        return -1;
-    }
-    printf("Сообщение №%d с действием %d успешно отправлено\n", to_send->number_of_comand_m2p, to_send->action_m2p);
-    return 0;
-}
 
 int create_queue_pic2motor()
 {
@@ -123,7 +103,6 @@ int create_queue_motor2pic()
 
 int send_command2motor(int cmd, void *buffer)
 {
-	here_are_am(__FUNCTION__);
     int fd = open("/dev/motor", O_WRONLY);
     if (ioctl(fd, cmd, buffer) == -1)
     {
@@ -135,6 +114,27 @@ int send_command2motor(int cmd, void *buffer)
     return 0;
 }
 
+int get_status() 
+{
+    motor_message status;
+    send_command2motor(MOTOR_GET_STATUS, &status);
+    return status.x;
+}
+
+int send_motor2pic_reply(motor2pic_t *to_send)
+{
+    here_are_am(__FUNCTION__);
+    to_send->motor_status = get_status();
+    if (mq_send(motor_ctx.motor2pic_queue, (char *)to_send, sizeof(motor2pic_t), PRIORITY_OF_QUEUE) == -1)
+    {
+        printf("mq_send motor2pic_queue not success, errno = %d\n", errno);
+        return -1;
+    }
+    printf("Сообщение №%d с действием %d успешно отправлено\nРазмер отправленного сообщения: %d\n", \
+           to_send->number_of_comand_m2p, to_send->action_m2p, sizeof(motor2pic_t));
+    return 0;
+}
+
 int set_movement(pic2motor_t *move_p2m)
 {
 	here_are_am(__FUNCTION__);
@@ -142,10 +142,8 @@ int set_movement(pic2motor_t *move_p2m)
     motor_steps_t motor_move;
     motor_move.x = 1;
 	motor_move.y = 0;
-	motor_ctx.cur_step += STEP_SIZE;
-	if (motor_ctx.cur_step >= LIMIT_STEP)
+	if (get_status() >= LIMIT_STEP)
 	{
-
         move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
 		move_m2p.action_m2p = CAM2MOTOR_ACTION_END_OF_ENUM;
 	    send_motor2pic_reply(&move_m2p);
@@ -155,10 +153,12 @@ int set_movement(pic2motor_t *move_p2m)
     for (i = 0; i < move_p2m->make_steps; i++)
     {
         if (send_command2motor(MOTOR_MOVE, &motor_move) != 0)
-        move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
-        move_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
-        send_motor2pic_reply(&move_m2p);
-        return -1;
+        {
+            move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
+            move_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
+            send_motor2pic_reply(&move_m2p);
+            return -1;
+        }
     }
     move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
     move_m2p.action_m2p = CAM2MOTOR_ACTION_STEP;
@@ -171,30 +171,31 @@ int calibration(pic2motor_t *calibration_p2m)
 	here_are_am(__FUNCTION__);
     motor2pic_t calibration_m2p = {0};
     motor_steps_t motor_move;
-    motor_move.x = -LIMIT_STEP;
+    motor_move.x = -1;
     motor_move.y = 0;
-    motor_ctx.cur_step = MOTOR_ZERO_POINT;
-    if (send_command2motor(MOTOR_MOVE, &motor_move) == 0)
+    int i;
+    for (i = 0; i < LIMIT_STEP; i++)
     {
-        calibration_m2p.number_of_comand_m2p = calibration_p2m->number_of_comand_p2m;
-    	calibration_m2p.action_m2p = CAM2MOTOR_ACTION_CALIBRATION;
-	    send_motor2pic_reply(&calibration_m2p);
-	    return 0;
+        if (send_command2motor(MOTOR_MOVE, &motor_move) != 0)
+        {
+            calibration_m2p.number_of_comand_m2p = calibration_p2m->number_of_comand_p2m;
+            calibration_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
+            send_motor2pic_reply(&calibration_m2p);
+            return -1;
+        }
     }
-    else
-    {
-        calibration_m2p.number_of_comand_m2p = calibration_p2m->number_of_comand_p2m;
-    	calibration_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
-	    send_motor2pic_reply(&calibration_m2p);
-    	return -1;
-    }
+    calibration_m2p.number_of_comand_m2p = calibration_p2m->number_of_comand_p2m;
+    calibration_m2p.action_m2p = CAM2MOTOR_ACTION_CALIBRATION;
+    send_motor2pic_reply(&calibration_m2p);
+    return 0;
 }
 
 void receive_pic2motor_request(pic2motor_t *to_receive)
 {
+    here_are_am(__FUNCTION__);
     while(1)
     {
-        int size_receive = mq_receive(motor_ctx.pic2motor_queue, (char *)&to_receive, sizeof(pic2motor_t), NULL);
+        int size_receive = mq_receive(motor_ctx.pic2motor_queue, (char *)to_receive, sizeof(pic2motor_t), NULL);
         if (size_receive < 0)
         {
             printf("размер сообщения меньше 0 байт. errno = %d\n", errno);
@@ -202,15 +203,15 @@ void receive_pic2motor_request(pic2motor_t *to_receive)
             sleep(3);
             continue;
         }
-        if (size_receive != sizeof(motor_ctx.msg_p2m))
+        if (size_receive != sizeof(pic2motor_t))
         {
             printf("размер полученного сообщения меньше ожидаемого. errno = %d\n", errno);
             printf("повтор попытки\n");
             sleep(3);
             continue;
         }
-        printf("я принял сообщение №%d с действием %d\nКоличество шагов = %d\n", \
-               to_receive->number_of_comand_p2m, to_receive->action_p2m, to_receive->number_of_comand_p2m);
+        printf("я принял сообщение №%d с действием %d\nКоличество шагов = %d\nРазмер полученного сообщения: %d\n", \
+               to_receive->number_of_comand_p2m, to_receive->action_p2m, to_receive->make_steps, sizeof(pic2motor_t));
         break;
     }
 }

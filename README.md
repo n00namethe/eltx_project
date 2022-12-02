@@ -1,13 +1,8 @@
-# eltx_project
+Пока не доделал мейк компилировать так:  
+  
+toolchain/bin/mips-linux-gnu-gcc -c libcontrol_motor.c  -lrt -lm  
+ar rc libjust_test.a libcontrol_motor.o  
+make motor_app  
+make api_motor_mq  
 
-Дано:
--репозиторий https://github.com/Dafang-Hacks в котором слит исходный код камеры Xiaomi.  
-
-Задача:  
-Получить команду из очереди сообщений и передать ее на мотор.  
-
-Мотор должен уметь выполнять 3 функции:  
--калиброваться;  
--делать шаг заданого размера;  
--отчитываться о выполнении каждой функции;  
-
+спасибо за внимание.

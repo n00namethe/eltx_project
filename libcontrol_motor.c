@@ -13,8 +13,6 @@
 
 typedef struct _control_motor_context_t
 {
-    motor2pic_t msg_m2p;
-    pic2motor_t msg_p2m;
 	mqd_t pic2motor_queue;
 	mqd_t motor2pic_queue;
 } control_motor_context_t;
@@ -22,9 +20,9 @@ control_motor_context_t cnt_ctx = {0};
 
 int event_number = 0;
 
-void here_are_am()
+void here_are_am(const char *asker_func_name)
 {
-    printf("я зашел в %s\n", __FUNCTION__);
+    printf("я зашел в %s\n", asker_func_name);
 }
 
 int send_motor2pic_request(pic2motor_t *to_send)
@@ -37,8 +35,8 @@ int send_motor2pic_request(pic2motor_t *to_send)
         printf("mq_send pic2motor_queue not success, errno = %d\n", errno);
         return -1;
     }
-    printf("Я отправил сообщение № %d с командой %d\nКоличество шагов = %d\n", \
-           to_send->number_of_comand_p2m, to_send->action_p2m, to_send->make_steps);
+    printf("Я отправил сообщение № %d с командой %d\nКоличество шагов = %d\nРазмер отправленного сообщения: %d\n", \
+           to_send->number_of_comand_p2m, to_send->action_p2m, to_send->make_steps, sizeof(pic2motor_t));
     return 0;
 }
 
@@ -87,7 +85,9 @@ void receive_motor2pic_reply(motor2pic_t *to_receive)
             sleep(3);
             continue;
         }
-        printf("я принял сообщение №%d от действия %d\n", to_receive->number_of_comand_m2p, to_receive->action_m2p);
+        printf("я принял сообщение №%d от действия %d\nРазмер полученного сообщения: %d\n", \
+               to_receive->number_of_comand_m2p, to_receive->action_m2p, sizeof(motor2pic_t));
+        printf("Текущее положение мотора: %d\n", to_receive->motor_status);
         break;
     }
 }
@@ -137,9 +137,9 @@ void step(int number_of_steps)
 
     motor2pic_t step_m2p = {0};
     receive_motor2pic_reply(&step_m2p);
-    if (step_p2m.action_p2m != step_m2p.action_m2p)
+    if (step_m2p.action_m2p == CAM2MOTOR_ACTION_END_OF_ENUM)
     {
-        printf("Мотор ответил не на то событие\nНомер отправленного: %d\nНомер полученного: %d\n", \
+        printf("Мотор дошел до конца\nНомер отправленного: %d\nНомер полученного: %d\n", \
                step_p2m.action_p2m, step_m2p.action_m2p);
     }
     if (step_p2m.number_of_comand_p2m != step_m2p.number_of_comand_m2p)
