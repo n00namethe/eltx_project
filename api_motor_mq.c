@@ -19,7 +19,11 @@ int you_choice()
         }
         case CAM2MOTOR_ACTION_STEP:
         {
-            step();
+            int number_of_steps;
+            printf("Введите количество шагов: ");
+            scanf("%d%*c", &number_of_steps);
+            printf("\n");
+            step(number_of_steps);
             break;
         }
         case CAM2MOTOR_ACTION_EXIT:

@@ -17,7 +17,7 @@
 
 #define STEP_SIZE 260
 #define MOTOR_ZERO_POINT 0
-#define LIMIT_STEP 2600
+
 
 struct mq_attr attributes_for_motor2pic_queue = 
 {
@@ -35,16 +35,16 @@ struct mq_attr attributes_for_pic2motor_queue =
     .mq_curmsgs = DEFAULT_VALUE
 };
 
-typedef enum _motor_status_t
+typedef enum _motor_status_e
 {
     MOTOR_IS_STOP,
     MOTOR_IS_RUNNING,
-} motor_status;
+} motor_status_e;
 
 typedef struct  {
     int x;
     int y;
-    motor_status status;
+    motor_status_e status;
     int speed;
 } motor_message;
 
@@ -66,9 +66,9 @@ typedef struct _motor_context_t
 } motor_context_t;
 motor_context_t motor_ctx = {0};
 
-void here_are_am(const char *asker_func_name)
+void here_are_am()
 {
-    printf("я зашел в %s\n", asker_func_name);
+    printf("я зашел в %s\n", __FUNCTION__);
 }
 
 /*void sig_receive_message()
@@ -83,16 +83,15 @@ void here_are_am(const char *asker_func_name)
     } 
 }*/
 
-int send_motor2pic_enum()
+int send_motor2pic_reply(motor2pic_t *to_send)
 {
     here_are_am(__FUNCTION__);
-	if (mq_send(motor_ctx.motor2pic_queue, (char *)&motor_ctx.msg_m2p, sizeof(motor_ctx.msg_m2p), PRIORITY_OF_QUEUE) == -1)
+	if (mq_send(motor_ctx.motor2pic_queue, (char *)to_send, sizeof(motor2pic_t), PRIORITY_OF_QUEUE) == -1)
     {
-        printf("mq_send step not success, errno = %d\n", errno);
+        printf("mq_send motor2pic_queue not success, errno = %d\n", errno);
         return -1;
     }
-    printf("Сообщение №%d с действием %d успешно отправлено\n", motor_ctx.msg_m2p.number_of_comand_m2p, motor_ctx.msg_m2p.action_m2p);
-    motor_ctx.msg_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
+    printf("Сообщение №%d с действием %d успешно отправлено\n", to_send->number_of_comand_m2p, to_send->action_m2p);
     return 0;
 }
 
@@ -136,65 +135,66 @@ int send_command2motor(int cmd, void *buffer)
     return 0;
 }
 
-int set_movement()
+int set_movement(pic2motor_t *move_p2m)
 {
 	here_are_am(__FUNCTION__);
+    motor2pic_t move_m2p = {0};
     motor_steps_t motor_move;
-    motor_move.x = STEP_SIZE;
+    motor_move.x = 1;
 	motor_move.y = 0;
 	motor_ctx.cur_step += STEP_SIZE;
 	if (motor_ctx.cur_step >= LIMIT_STEP)
 	{
-        motor_ctx.msg_m2p.number_of_comand_m2p = motor_ctx.msg_p2m.number_of_comand_p2m;
-		motor_ctx.msg_m2p.action_m2p = CAM2MOTOR_ACTION_END_OF_ENUM;
-	    send_motor2pic_enum();
+
+        move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
+		move_m2p.action_m2p = CAM2MOTOR_ACTION_END_OF_ENUM;
+	    send_motor2pic_reply(&move_m2p);
 	    return 0;
 	}
-	if (send_command2motor(MOTOR_MOVE, &motor_move) == 0)
-	{
-        motor_ctx.msg_m2p.number_of_comand_m2p = motor_ctx.msg_p2m.number_of_comand_p2m;
-        motor_ctx.msg_m2p.action_m2p = CAM2MOTOR_ACTION_STEP;
-	    send_motor2pic_enum();
-	    return 0;
-	}
-	else
-	{
-        motor_ctx.msg_m2p.number_of_comand_m2p = motor_ctx.msg_p2m.number_of_comand_p2m;
-		motor_ctx.msg_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
-	    send_motor2pic_enum();
-    	return -1;
-	}
+    int i;
+    for (i = 0; i < move_p2m->make_steps; i++)
+    {
+        if (send_command2motor(MOTOR_MOVE, &motor_move) != 0)
+        move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
+        move_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
+        send_motor2pic_reply(&move_m2p);
+        return -1;
+    }
+    move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
+    move_m2p.action_m2p = CAM2MOTOR_ACTION_STEP;
+    send_motor2pic_reply(&move_m2p);
+    return 0;
 }
 
-int calibration()
+int calibration(pic2motor_t *calibration_p2m)
 {
 	here_are_am(__FUNCTION__);
+    motor2pic_t calibration_m2p = {0};
     motor_steps_t motor_move;
     motor_move.x = -LIMIT_STEP;
     motor_move.y = 0;
     motor_ctx.cur_step = MOTOR_ZERO_POINT;
     if (send_command2motor(MOTOR_MOVE, &motor_move) == 0)
     {
-        motor_ctx.msg_m2p.number_of_comand_m2p = motor_ctx.msg_p2m.number_of_comand_p2m;
-    	motor_ctx.msg_m2p.action_m2p = CAM2MOTOR_ACTION_CALIBRATION;
-	    send_motor2pic_enum();
+        calibration_m2p.number_of_comand_m2p = calibration_p2m->number_of_comand_p2m;
+    	calibration_m2p.action_m2p = CAM2MOTOR_ACTION_CALIBRATION;
+	    send_motor2pic_reply(&calibration_m2p);
 	    return 0;
     }
     else
     {
-        motor_ctx.msg_m2p.number_of_comand_m2p = motor_ctx.msg_p2m.number_of_comand_p2m;
-    	motor_ctx.msg_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
-	    send_motor2pic_enum();
+        calibration_m2p.number_of_comand_m2p = calibration_p2m->number_of_comand_p2m;
+    	calibration_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
+	    send_motor2pic_reply(&calibration_m2p);
     	return -1;
     }
 }
 
-int receive_pic2motor_enum()
+void receive_pic2motor_request(pic2motor_t *to_receive)
 {
-	here_are_am(__FUNCTION__); 
-    while (1)
+    while(1)
     {
-        int size_receive = mq_receive(motor_ctx.pic2motor_queue, (char *)&motor_ctx.msg_p2m, sizeof(motor_ctx.msg_p2m), NULL);
+        int size_receive = mq_receive(motor_ctx.pic2motor_queue, (char *)&to_receive, sizeof(pic2motor_t), NULL);
         if (size_receive < 0)
         {
             printf("размер сообщения меньше 0 байт. errno = %d\n", errno);
@@ -209,17 +209,37 @@ int receive_pic2motor_enum()
             sleep(3);
             continue;
         }
+        printf("я принял сообщение №%d с действием %d\nКоличество шагов = %d\n", \
+               to_receive->number_of_comand_p2m, to_receive->action_p2m, to_receive->number_of_comand_p2m);
+        break;
+    }
+}
 
-        switch(motor_ctx.msg_p2m.action_p2m)
+int pic2motor_request()
+{
+	here_are_am(__FUNCTION__); 
+    while (1)
+    {
+        pic2motor_t receive_request = {0};
+        receive_pic2motor_request(&receive_request);
+        switch(receive_request.action_p2m)
         {
         	case CAM2MOTOR_ACTION_CALIBRATION:
     		{
-    			calibration();
+    			if (calibration(&receive_request) != 0)
+                {
+                    printf("Калибровка не состоялась, закрываю очереди\n");
+                    return 0;
+                }
     			break;
     		}
     		case CAM2MOTOR_ACTION_STEP:
 			{
-				set_movement();
+				if (set_movement(&receive_request) != 0)
+                {
+                    printf("Пошагать не получилось, закрываю очереди\n");
+                    return 0;
+                }
 				break;
 			}
 			case CAM2MOTOR_ACTION_EXIT:
@@ -235,11 +255,17 @@ int receive_pic2motor_enum()
         }
     }
 }
+
+void init_queues()
+{
+    create_queue_pic2motor();
+    create_queue_motor2pic();
+}
+
 int main()
 {
-	create_queue_pic2motor();
-	create_queue_motor2pic();
-	receive_pic2motor_enum();
+	init_queues();
+	pic2motor_request();
 	if (mq_close(motor_ctx.pic2motor_queue) == -1)
     {
         printf("mq_close serv_queue not success, errno = %d\n", errno);

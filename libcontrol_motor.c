@@ -20,21 +20,25 @@ typedef struct _control_motor_context_t
 } control_motor_context_t;
 control_motor_context_t cnt_ctx = {0};
 
-void here_are_am(const char *asker_func_name)
+int event_number = 0;
+
+void here_are_am()
 {
-    printf("я зашел в %s\n", asker_func_name);
+    printf("я зашел в %s\n", __FUNCTION__);
 }
 
-int send_pic2motor_enum()
+int send_motor2pic_request(pic2motor_t *to_send)
 {
     here_are_am(__FUNCTION__);
-    if (mq_send(cnt_ctx.pic2motor_queue, (char *)&cnt_ctx.msg_p2m, sizeof(cnt_ctx.msg_p2m), PRIORITY_OF_QUEUE) == -1)
+    event_number++;
+    to_send->number_of_comand_p2m = event_number;
+    if (mq_send(cnt_ctx.pic2motor_queue, (char *)to_send, sizeof(pic2motor_t), PRIORITY_OF_QUEUE) == -1)
     {
         printf("mq_send pic2motor_queue not success, errno = %d\n", errno);
         return -1;
     }
-    printf("Я отправил сообщение № %d с командой %d\n", cnt_ctx.msg_p2m.number_of_comand_p2m, cnt_ctx.msg_p2m.action_p2m);
-    cnt_ctx.msg_p2m.number_of_comand_p2m += 1;
+    printf("Я отправил сообщение № %d с командой %d\nКоличество шагов = %d\n", \
+           to_send->number_of_comand_p2m, to_send->action_p2m, to_send->make_steps);
     return 0;
 }
 
@@ -47,11 +51,11 @@ void connect_queue_pic2motor()
         cnt_ctx.pic2motor_queue = mq_open(PIC2MOTOR_QUEUE, O_WRONLY);
         if (cnt_ctx.pic2motor_queue == -1)
         {
-            printf("mq_open not success\nnext try 3..2..1..\nerrno = %d\n", errno);
+            printf("mq_open pic2motor not success\nnext try 3..2..1..\nerrno = %d\n", errno);
             sleep(3);
         }
     }
-    printf("Подкдючение к очереди произошло успешно, queue descriptor: %d\n", (int)cnt_ctx.pic2motor_queue);
+    printf("Подкдючение к очереди pic2motor произошло успешно, queue descriptor: %d\n", (int)cnt_ctx.pic2motor_queue);
 }
 
 void connect_queue_motor2pic()
@@ -63,27 +67,27 @@ void connect_queue_motor2pic()
         cnt_ctx.motor2pic_queue = mq_open(MOTOR2PIC_QUEUE, O_RDONLY);
         if (cnt_ctx.motor2pic_queue == -1)
         {
-            printf("mq_open not success\nnext try 3..2..1..\nerrno = %d\n", errno);
+            printf("mq_open motor2pic not success\nnext try 3..2..1..\nerrno = %d\n", errno);
             sleep(3);
         }
     }
-    printf("Подкдючение к очереди произошло успешно, queue descriptor: %d\n", (int)cnt_ctx.motor2pic_queue);
+    printf("Подкдючение к очереди motor2pic произошло успешно, queue descriptor: %d\n", (int)cnt_ctx.motor2pic_queue);
 }
 
-void receive_motor2pic_enum()
+void receive_motor2pic_reply(motor2pic_t *to_receive)
 {
     here_are_am(__FUNCTION__);
     while (1)
     {
-        int size_receive = mq_receive(cnt_ctx.motor2pic_queue, (char *)&cnt_ctx.msg_m2p, sizeof(cnt_ctx.msg_m2p), NULL);
-        if (size_receive != sizeof(cnt_ctx.msg_m2p))
+        int size_receive = mq_receive(cnt_ctx.motor2pic_queue, (char *)to_receive, sizeof(motor2pic_t), NULL);
+        if (size_receive != sizeof(motor2pic_t))
         {
             printf("размер полученного сообщения не соответсвует ожидаемому. errno = %d\n", errno);
             printf("повтор попытки\n");
             sleep(3);
             continue;
         }
-        printf("я принял сообщение №%d от действия %d\n", cnt_ctx.msg_m2p.number_of_comand_m2p, cnt_ctx.msg_m2p.action_m2p);
+        printf("я принял сообщение №%d от действия %d\n", to_receive->number_of_comand_m2p, to_receive->action_m2p);
         break;
     }
 }
@@ -91,40 +95,61 @@ void receive_motor2pic_enum()
 void goodbye_motor()
 {
     here_are_am(__FUNCTION__);
-    cnt_ctx.msg_p2m.action_p2m = CAM2MOTOR_ACTION_EXIT;
-    send_pic2motor_enum();
+    pic2motor_t goodbye = {0};
+    goodbye.action_p2m = CAM2MOTOR_ACTION_EXIT;
+    send_motor2pic_request(&goodbye);
 }
 
 void calibration()
 {
     here_are_am(__FUNCTION__);
-    cnt_ctx.msg_p2m.action_p2m = CAM2MOTOR_ACTION_CALIBRATION;
-    send_pic2motor_enum();
-    receive_motor2pic_enum();
-    if (cnt_ctx.msg_m2p.number_of_comand_m2p != cnt_ctx.msg_p2m.number_of_comand_p2m - 1)
+    pic2motor_t calibration_p2m = {0};
+    calibration_p2m.action_p2m = CAM2MOTOR_ACTION_CALIBRATION;
+    calibration_p2m.make_steps = LIMIT_STEP;
+    send_motor2pic_request(&calibration_p2m);
+
+    motor2pic_t calibration_m2p = {0};
+    receive_motor2pic_reply(&calibration_m2p);
+    if (calibration_p2m.action_p2m != calibration_m2p.action_m2p)
     {
-        printf("Мотор ответил не на то сообщение\nНомер отправленного: %d\nНомер полученного: %d\n", cnt_ctx.msg_p2m.number_of_comand_p2m - 1, cnt_ctx.msg_m2p.number_of_comand_m2p);
+        printf("Мотор ответил не на то событие\nНомер отправленного: %d\nНомер полученного: %d\n", \
+               calibration_p2m.action_p2m, calibration_m2p.action_m2p);
     }
-    if (cnt_ctx.msg_m2p.action_m2p == CAM2MOTOR_ACTION_INVALID_TYPE)
+    if (calibration_p2m.number_of_comand_p2m != calibration_m2p.number_of_comand_m2p)
+    {
+        printf("Мотор ответил не на то сообщение\nНомер отправленного: %d\nНомер полученного: %d\n", \
+               calibration_p2m.number_of_comand_p2m, calibration_m2p.number_of_comand_m2p);
+    }
+    if (calibration_m2p.action_m2p == CAM2MOTOR_ACTION_INVALID_TYPE)
     {
         printf("Какие-то проблемы с калибровкой\n");
     }
 }
 
-void step()
+void step(int number_of_steps)
 {
     here_are_am(__FUNCTION__);
-    cnt_ctx.msg_p2m.action_p2m = CAM2MOTOR_ACTION_STEP;
-    send_pic2motor_enum();
-    receive_motor2pic_enum();
-    if (cnt_ctx.msg_m2p.number_of_comand_m2p != cnt_ctx.msg_p2m.number_of_comand_p2m - 1)
+
+    pic2motor_t step_p2m = {0};
+    step_p2m.action_p2m = CAM2MOTOR_ACTION_STEP;
+    step_p2m.make_steps = number_of_steps;
+    send_motor2pic_request(&step_p2m);
+
+    motor2pic_t step_m2p = {0};
+    receive_motor2pic_reply(&step_m2p);
+    if (step_p2m.action_p2m != step_m2p.action_m2p)
     {
-        printf("Мотор ответил не на то сообщение\nНомер отправленного: %d\nНомер полученного: %d\n", cnt_ctx.msg_p2m.number_of_comand_p2m - 1, cnt_ctx.msg_m2p.number_of_comand_m2p);
+        printf("Мотор ответил не на то событие\nНомер отправленного: %d\nНомер полученного: %d\n", \
+               step_p2m.action_p2m, step_m2p.action_m2p);
     }
-    else if (cnt_ctx.msg_m2p.action_m2p == CAM2MOTOR_ACTION_END_OF_ENUM)
+    if (step_p2m.number_of_comand_p2m != step_m2p.number_of_comand_m2p)
     {
-        printf("мотор выполнил все шаги, запускаю функцию goodbye_motor\n");
-        goodbye_motor();
+        printf("Мотор ответил не на то сообщение\nНомер отправленного: %d\nНомер полученного: %d\n", \
+               step_p2m.number_of_comand_p2m, step_m2p.number_of_comand_m2p);
+    }
+    if (step_m2p.action_m2p == CAM2MOTOR_ACTION_INVALID_TYPE)
+    {
+        printf("Какие-то проблемы с шагом\n");
     }
 }
 
