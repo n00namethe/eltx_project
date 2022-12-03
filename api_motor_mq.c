@@ -1,7 +1,7 @@
-#include "head_motor.h"
+#include "motor_daemon.h"
+#include "motor_daemon_api.h"
 #include <stdio.h>
 #include <unistd.h>
-#include "head_to_lib.h"
 
 #define EXIT_NUMBER 2
 

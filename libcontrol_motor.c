@@ -8,26 +8,30 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <string.h>
-#include "head_motor.h"
-#include "head_to_lib.h"
+#include "motor_daemon.h"
+#include "motor_daemon_api.h"
 
 typedef struct _control_motor_context_t
 {
-	mqd_t pic2motor_queue;
-	mqd_t motor2pic_queue;
+    mqd_t pic2motor_queue;
+    mqd_t motor2pic_queue;
 } control_motor_context_t;
 control_motor_context_t cnt_ctx = {0};
 
 int event_number = 0;
 
+#ifdef DEBUG
 void here_are_am(const char *asker_func_name)
 {
     printf("я зашел в %s\n", asker_func_name);
 }
+#endif
 
 int send_motor2pic_request(pic2motor_t *to_send)
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
     event_number++;
     to_send->number_of_comand_p2m = event_number;
     if (mq_send(cnt_ctx.pic2motor_queue, (char *)to_send, sizeof(pic2motor_t), PRIORITY_OF_QUEUE) == -1)
@@ -35,14 +39,16 @@ int send_motor2pic_request(pic2motor_t *to_send)
         printf("mq_send pic2motor_queue not success, errno = %d\n", errno);
         return -1;
     }
-    printf("Я отправил сообщение № %d с командой %d\nКоличество шагов = %d\nРазмер отправленного сообщения: %d\n", \
+    printf("Я отправил сообщение № %d с командой %d\nКоличество шагов = %d\nРазмер отправленного сообщения: %ld\n", \
            to_send->number_of_comand_p2m, to_send->action_p2m, to_send->make_steps, sizeof(pic2motor_t));
     return 0;
 }
 
 void connect_queue_pic2motor()
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
     while (cnt_ctx.pic2motor_queue <= 0)
     {
         printf("я в цикле, жду подключения к серверу\n");
@@ -58,7 +64,9 @@ void connect_queue_pic2motor()
 
 void connect_queue_motor2pic()
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
     while (cnt_ctx.motor2pic_queue <= 0)
     {
         printf("я в цикле, жду подключения к серверу\n");
@@ -74,7 +82,9 @@ void connect_queue_motor2pic()
 
 void receive_motor2pic_reply(motor2pic_t *to_receive)
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
     while (1)
     {
         int size_receive = mq_receive(cnt_ctx.motor2pic_queue, (char *)to_receive, sizeof(motor2pic_t), NULL);
@@ -85,7 +95,7 @@ void receive_motor2pic_reply(motor2pic_t *to_receive)
             sleep(3);
             continue;
         }
-        printf("я принял сообщение №%d от действия %d\nРазмер полученного сообщения: %d\n", \
+        printf("я принял сообщение №%d от действия %d\nРазмер полученного сообщения: %ld\n", \
                to_receive->number_of_comand_m2p, to_receive->action_m2p, sizeof(motor2pic_t));
         printf("Текущее положение мотора: %d\n", to_receive->motor_status);
         break;
@@ -94,7 +104,9 @@ void receive_motor2pic_reply(motor2pic_t *to_receive)
 
 void goodbye_motor()
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
     pic2motor_t goodbye = {0};
     goodbye.action_p2m = CAM2MOTOR_ACTION_EXIT;
     send_motor2pic_request(&goodbye);
@@ -102,7 +114,9 @@ void goodbye_motor()
 
 void calibration()
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
     pic2motor_t calibration_p2m = {0};
     calibration_p2m.action_p2m = CAM2MOTOR_ACTION_CALIBRATION;
     calibration_p2m.make_steps = LIMIT_STEP;
@@ -128,7 +142,9 @@ void calibration()
 
 void step(int number_of_steps)
 {
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
+    #endif
 
     pic2motor_t step_p2m = {0};
     step_p2m.action_p2m = CAM2MOTOR_ACTION_STEP;

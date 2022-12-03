@@ -8,12 +8,20 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <string.h>
-#include "motor_daemon.h"
+#include <syslog.h>
+#include <signal.h>
+#include "head_motor.h"
 
 #define DEFAULT_VALUE 0
-
-#define MOTOR_MOVE		    0x3
+//#define DEBUG
+#define MOTOR_MOVE          0x3
 #define MOTOR_GET_STATUS    0x4
+
+void signal_handler(int signum)
+{
+    syslog(LOG_NOTICE, "Catch signal w/ id %d", signum);
+    return;
+}
 
 struct mq_attr attributes_for_motor2pic_queue = 
 {
@@ -72,10 +80,9 @@ int create_queue_pic2motor()
     motor_ctx.pic2motor_queue = mq_open(PIC2MOTOR_QUEUE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR, &attributes_for_pic2motor_queue);
     if (motor_ctx.pic2motor_queue == -1)
     {
-    	printf("ошибка открытия очереди pic2motor_queue, errno = %d\n", errno);
+        syslog(LOG_NOTICE, "ошибка открытия очереди pic2motor_queue, errno = %d\n", errno);
         exit(EXIT_FAILURE);
     }
-    printf("очередь pic2motor_queue успешнот открыта, ФД = %d\n", (int)motor_ctx.pic2motor_queue);
     return 0;
 }
 
@@ -87,10 +94,9 @@ int create_queue_motor2pic()
     motor_ctx.motor2pic_queue = mq_open(MOTOR2PIC_QUEUE, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR, &attributes_for_motor2pic_queue);
     if (motor_ctx.motor2pic_queue == -1)
     {
-        printf("ошибка открытия очереди motor2pic_queue, errno = %d\n", errno);
+        syslog(LOG_NOTICE, "ошибка открытия очереди motor2pic_queue, errno = %d\n", errno);
         exit(EXIT_FAILURE);
     }
-    printf("очередь motor2pic_queue успешнот открыта, ФД = %d\n", (int)motor_ctx.motor2pic_queue);
     return 0;
 }
 
@@ -99,7 +105,7 @@ int send_command2motor(int cmd, void *buffer)
     int fd = open("/dev/motor", O_WRONLY);
     if (ioctl(fd, cmd, buffer) == -1)
     {
-        printf("send_command2motor not success, errno = %d\n", errno);
+        syslog(LOG_NOTICE, "send_command2motor not success, errno = %d\n", errno);
         close(fd);
         return -1;
     }
@@ -122,25 +128,23 @@ int send_motor2pic_reply(motor2pic_t *to_send)
     to_send->motor_status = get_status();
     if (mq_send(motor_ctx.motor2pic_queue, (char *)to_send, sizeof(motor2pic_t), PRIORITY_OF_QUEUE) == -1)
     {
-        printf("mq_send motor2pic_queue not success, errno = %d\n", errno);
+        syslog(LOG_NOTICE, "mq_send motor2pic_queue not success, errno = %d\n", errno);
         return -1;
     }
-    printf("Сообщение №%d с действием %d успешно отправлено\nРазмер отправленного сообщения: %ld\n", \
-           to_send->number_of_comand_m2p, to_send->action_m2p, sizeof(motor2pic_t));
     return 0;
 }
 
 int set_movement(pic2motor_t *move_p2m)
 {
-	#ifdef DEBUG
+    #ifdef DEBUG
     here_are_am(__FUNCTION__);
     #endif
     motor2pic_t move_m2p = {0};
     motor_steps_t motor_move;
     motor_move.x = 1;
-	motor_move.y = 0;
-	if (get_status() >= LIMIT_STEP)
-	{
+    motor_move.y = 0;
+    if (get_status() >= LIMIT_STEP)
+    {
         move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
         move_m2p.action_m2p = CAM2MOTOR_ACTION_END_OF_ENUM;
         send_motor2pic_reply(&move_m2p);
@@ -153,6 +157,7 @@ int set_movement(pic2motor_t *move_p2m)
         {
             move_m2p.number_of_comand_m2p = move_p2m->number_of_comand_p2m;
             move_m2p.action_m2p = CAM2MOTOR_ACTION_INVALID_TYPE;
+            syslog(LOG_NOTICE, "calibration not success");
             send_motor2pic_reply(&move_m2p);
             return -1;
         }
@@ -189,7 +194,7 @@ int calibration(pic2motor_t *calibration_p2m)
     return 0;
 }
 
-void receive_pic2motor_request(pic2motor_t *to_receive)
+int receive_pic2motor_request(pic2motor_t *to_receive)
 {
     #ifdef DEBUG
     here_are_am(__FUNCTION__);
@@ -199,22 +204,17 @@ void receive_pic2motor_request(pic2motor_t *to_receive)
         int size_receive = mq_receive(motor_ctx.pic2motor_queue, (char *)to_receive, sizeof(pic2motor_t), NULL);
         if (size_receive < 0)
         {
-            printf("размер сообщения меньше 0 байт. errno = %d\n", errno);
-            printf("повтор попытки\n");
             sleep(3);
             continue;
         }
         if (size_receive != sizeof(pic2motor_t))
         {
-            printf("размер полученного сообщения меньше ожидаемого. errno = %d\n", errno);
-            printf("повтор попытки\n");
             sleep(3);
             continue;
         }
-        printf("я принял сообщение №%d с действием %d\nКоличество шагов = %d\nРазмер полученного сообщения: %ld\n", \
-               to_receive->number_of_comand_p2m, to_receive->action_p2m, to_receive->make_steps, sizeof(pic2motor_t));
         break;
     }
+    return 0;
 }
 
 int pic2motor_request()
@@ -232,7 +232,7 @@ int pic2motor_request()
             {
                 if (calibration(&receive_request) != 0)
                 {
-                    printf("Калибровка не состоялась, закрываю очереди\n");
+                    syslog(LOG_NOTICE, "Калибровка не состоялась, закрываю очереди");
                     return 0;
                 }
                 break;
@@ -241,23 +241,24 @@ int pic2motor_request()
             {
                 if (set_movement(&receive_request) != 0)
                 {
-                    printf("Пошагать не получилось, закрываю очереди\n");
+                    syslog(LOG_NOTICE, "Пошагать не получилось, закрываю очереди");
                     return 0;
                 }
                 break;
             }
             case CAM2MOTOR_ACTION_EXIT:
             {
-                printf("поступила команда выход\n");
+                syslog(LOG_NOTICE,"поступила команда выход");
                 return 0;
             }
             default:
             {
-                printf("получен неопознанный тип события\n");
+                syslog(LOG_NOTICE,"получен неопознанный тип события");
                 break;
             }
         }
     }
+    return 0;
 }
 
 void init_queues()
@@ -266,41 +267,108 @@ void init_queues()
     create_queue_motor2pic();
 }
 
-void close_queue()
+int close_queue()
 {
     #ifdef DEBUG
     here_are_am(__FUNCTION__);
     #endif
     if (mq_close(motor_ctx.pic2motor_queue) == -1)
     {
-        printf("mq_close serv_queue not success, errno = %d\n", errno);
+        syslog(LOG_NOTICE, "mq_close serv_queue not success, errno = %d", errno);
         mq_close(motor_ctx.pic2motor_queue);
         mq_unlink(MOTOR2PIC_QUEUE);
-        exit(EXIT_FAILURE);
+        return -1;
     }
     if (mq_unlink(PIC2MOTOR_QUEUE) == -1)
     {
-        printf("mq_unlink PIC2MOTOR_QUEUE not success, errno = %d\n", errno);
+        syslog(LOG_NOTICE, "mq_unlink PIC2MOTOR_QUEUE not success, errno = %d", errno);
         mq_close(motor_ctx.pic2motor_queue);
         mq_unlink(MOTOR2PIC_QUEUE);
-        exit(EXIT_FAILURE);
+        return -1;
     }
     if (mq_close(motor_ctx.motor2pic_queue) == -1)
     {
-        printf("mq_close motor2pic_queue not success, errno = %d\n", errno);
-        exit(EXIT_FAILURE);
+        syslog(LOG_NOTICE, "mq_close motor2pic_queue not success, errno = %d", errno);
+        return -1;
     }
     if (mq_unlink(MOTOR2PIC_QUEUE) == -1)
     {
-        printf("mq_unlink MOTOR2PIC_QUEUE not success, errno = %d\n", errno);
-        exit(EXIT_FAILURE);
+        syslog(LOG_NOTICE, "mq_unlink MOTOR2PIC_QUEUE not success, errno = %d", errno);
+        return -1;
     }
+    return 0;
 }
 
-int main()
+void start_log()
 {
+    openlog("daemon_motor", LOG_PID, LOG_DAEMON);
+    syslog (LOG_NOTICE, "daemon started.");
+}
+
+void set_signal()
+{
+    syslog (LOG_NOTICE, "triggered signal");
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = signal_handler;
+    sigaction(SIGTERM, &action, NULL);
+}
+
+void daemonization()
+{
+    setsid();
+    chdir("/");
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+    start_log();
+    set_signal();
+}
+
+void Daemon_motor_main()
+{
+    daemonization();
     init_queues();
     pic2motor_request();
     close_queue();
-	return 0;
+    syslog(LOG_NOTICE, "daemon terminated.");
+    closelog();
+    exit(EXIT_SUCCESS);
 }
+
+int main(int argc, char* argv[])
+{
+    pid_t parpid;
+
+    if (argc < 2)
+    {
+        printf("Usage ./daemon -d for daemon or ./daemon -i for interactive\n");
+        exit(1);
+    }
+    if (strcmp(argv[1], "-i") == 0)
+    {
+        printf("Запущен интерактивный режим работы демона\n");
+        Daemon_motor_main();
+    }
+    else if (strcmp(argv[1], "-d") == 0)
+    {
+        if ((parpid = fork()) < 0) 
+        {                  
+            printf("\ncan't fork");
+            exit(1);               
+        }
+        else if (parpid != 0)
+        {
+            exit(0);
+        }
+        Daemon_motor_main();
+    }
+    else
+    {
+        printf("Usage ./daemon -d for daemon or ./daemon -i for interactive\n");
+        exit(1);
+    }
+    return 0;
+}
+
+

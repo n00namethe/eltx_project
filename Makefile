@@ -1,7 +1,6 @@
 TOOLCHAIN = $(pwd)../toolchain/bin
 CROSS_COMPILE = $(TOOLCHAIN)/mips-linux-gnu-
 CC = $(CROSS_COMPILE)gcc
-CPLUSPLUS = $(CROSS_COMPILE)g++
 LD = $(CROSS_COMPILE)ld
 AR = $(CROSS_COMPILE)ar cr
 STRIP = $(CROSS_COMPILE)strip
@@ -14,18 +13,14 @@ LDFLAG += -muclibc
 
 LDFLAG += -Wl,-gc-sections
 
-all: motor_app control_motor
+all: motor_app api_motor_mq
 
 motor_app: motor_app.o
-	$(CC) $(LDFLAG) -o $@ $^ $(LIBS) -lpthread -lm -lrt
+	$(CC) $(LDFLAG) -o $@ $^ $(LIBS) -lm -lrt -std=gnu99
 	$(STRIP) $@
 
-control_motor: control_motor.o
-	$(CC) $(LDFLAG) -o $@ $^ $(LIBS) -lpthread -lm -lrt
-	$(STRIP) $@
-
-%.o:%.c sample-common.h
-	$(CC) -c $(CFLAGS) $< -o $@
+api_motor_mq: api_motor_mq.o
+	$(CC) $(LDFLAG) -o $@ $^ $(LIBS) -lm -lrt -L. -ljust_test
 
 clean:
 	rm -f *.o *~

@@ -5,7 +5,6 @@ export CROSS_COMPILE=${CROSS_COMPILE}
 export CC=${CROSS_COMPILE}gcc
 export LD=${CROSS_COMPILE}ld
 export CFLAGS="-muclibc -O2 -DDEBUG_TRACE -DFAKE_ROOT "
-export CPPFLAGS="-muclibc -O2"
-export LDFLAGS="-muclibc -O2"
+export LDFLAGS="-uclibc -O2"
 make clean
 make
